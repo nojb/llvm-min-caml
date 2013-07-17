@@ -1,0 +1,78 @@
+OVERVIEW:
+
+llvm-min-caml is a compiler for a subset of the OCaml programming
+language that targets the LLVM intermediate representation. It builds
+directly on the work of Eijiro Sumii, Moe Masuko, Kenichi Asai, who
+built the min-caml compiler targeting SPARC, PowerPC, and x86 assembly.
+Their project (along with documentation) can be found at
+
+            http://min-caml.sourceforge.net/index-e.html
+
+I added a new backend targeting LLVM. Since I have no intention of
+mantaining the other backends, I have removed them (along with all other
+supporting files) from my distribution.
+
+The current status is full support of all the features of the original
+min-caml compiler, as can be found in the above website. In particular,
+we perform full tail-call optimization.
+
+OTHER LLVM PORTS:
+
+There are at least two other LLVM ports of min-caml that can be found
+through Google, but both fail to correctly perform tail-call optimization
+in all cases.
+
+* https://github.com/mzp/min-caml
+
+* https://github.com/kmacy/llmincaml
+
+The second one (llmincaml) failed to produce any LLVM output in fact when
+I compiled it. But inspection of the source shows that it does not perform
+tail call optimization in the case of an 'If' in tail position.
+
+PREREQUISITES:
+
+* OCaml version >= 3.0 (* XXX *)
+
+* LLVM version >= 000 with OCaml bindings
+
+  To install this it should be enough to do
+
+      opam install llvm
+
+INSTALL:
+
+If both the prerequisites are installed and configured
+correclty, then
+
+      ocamlbuild main.native
+
+Will build the compiler.
+
+COPYRIGHT:
+
+All the files are copyright 2005, 2006, 2007, 2008, 2013, Eijiro
+Sumii, Moe Masuko, Kenichi Asai, Nicolas Ojeda Bar, and distributed
+under the conditions stated in the file LICENCE.
+
+BUG REPORTS AND USER FEEDBACK:
+
+Please report bugs and any user feedback directly to me at
+
+                no263@dpmms.cam.ac.uk.
+
+CHANGELOG FOR PRE-LLVM VERSIONS:
+
+[Update on July 24, 2012]
+
+- 32-bit x86 (with SSE2, that is, Pentium IV or later) is now
+  supported (on Linux and Cygwin); execute ./to_x86 before make.
+
+[Updates on September 17, 2008]
+
+- PowerPC is now supported (in addition to SPARC), thanks to
+  Ms. Masuko and Prof. Asai in Ochanomizu University.  You _must_
+  execute either ./to_ppc or ./to_sparc _before_ make.
+
+- The register allocator now uses a simpler algorithm.  It omits the
+  backtracking (ToSpill and NoSpill) in previous versions.

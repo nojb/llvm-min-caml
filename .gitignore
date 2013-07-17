@@ -1,0 +1,8 @@
+.DS_Store
+_build
+*.native
+*.top
+*.byte
+test/*.s
+test/*.ll
+test/*.bc
