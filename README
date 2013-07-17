@@ -36,7 +36,10 @@ PREREQUISITES:
 
 I have 4.00.0 in my machine, but it should work with
 previous versions as well. I will update this README once
-I find out about this.
+I find out about this. The OCaml distribution can be
+downloaded from
+
+      http://caml.inria.fr
 
 * LLVM with Ocaml bindings
 
