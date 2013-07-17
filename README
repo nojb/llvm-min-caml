@@ -32,22 +32,53 @@ tail call optimization in the case of an 'If' in tail position.
 
 PREREQUISITES:
 
-* OCaml version >= 3.0 (* XXX *)
+* OCaml
 
-* LLVM version >= 000 with OCaml bindings
+I have 4.00.0 in my machine, but it should work with
+previous versions as well. I will update this README once
+I find out about this.
 
-  To install this it should be enough to do
+* LLVM with Ocaml bindings
+
+I used LLVM version 3.1 but, again, it should work with
+earlier versions as well. I will update this README once
+I find out about this.
+
+In any case, installing this should be as easy as running
 
       opam install llvm
 
-INSTALL:
+BUILDING:
 
 If both the prerequisites are installed and configured
-correclty, then
+correclty, then follow the steps to build the llvm-min-caml
+compiler.
+
+1- Get the source from GitHub
+
+      git clone https://github.com/nojb/llvm-min-caml.git
+
+2- A directory named 'llvm-min-caml' will have been created.
+   Move into it.
+
+      cd llvm-min-caml
+
+3- Build the sources.
 
       ocamlbuild main.native
 
-Will build the compiler.
+4- Test the compiler.
+
+I will add a proper test suite in the future, but for now
+you can do the following.
+
+      ./main.native -iter 0 test/gcd
+
+This will produce some debug output and should leave create
+a file test/gcd.bc containing the LLVM bitcode. To actually
+see it, you can use the llvm-dis utility from the LLVM distribution.
+
+      llvm-dis < test/gcd.bc
 
 COPYRIGHT:
 
