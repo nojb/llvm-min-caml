@@ -1,4 +1,4 @@
-type closure = { entry : Id.l; actual_fv : Id.t list }
+type closure = { entry : Id.l * Type.t; actual_fv : Id.t list }
 type t =
   | Unit
   | Bool of bool
@@ -18,7 +18,7 @@ type t =
   | If of Id.t * t * t
   | Let of (Id.t * Type.t) * t * t
   | Var of Id.t
-  | MakeCls of (Id.t * Type.t) * closure * t
+  | MakeCls of closure
   | AppCls of Id.t * Id.t list
   | AppDir of Id.l * Id.t list
   | Tuple of Id.t list

@@ -75,8 +75,9 @@ let emit_alloca t id v =
   ignore (build_store v a the_builder);
   a
 
-let make_cls env (id, t) clos =
+let make_cls env clos =
   let actual_fv = List.map (atom env) clos.actual_fv in
+  let Id.L id, t = clos.entry in
   let tl, t =
     (match t with Type.Fun (tl, t) -> tl, t | _ -> assert false) in
   let fn_type = 
@@ -227,15 +228,8 @@ let rec f_nontail env e =
       res
   | Atom a ->
       atom env a
-  | MakeCls ((Var id, t), clos, e) ->
-      let vclos = make_cls env (id, t) clos in
-      f_nontail (M.add id vclos env) e
-  | MakeCls ((Root id, t), clos, e) ->
-      let vclos = make_cls env (id, t) clos in
-      let a = emit_alloca (emit_type t) id vclos in
-      let res = f_nontail (M.add id a env) e in
-      ignore (build_store (const_null (emit_type t)) a the_builder);
-      res
+  | MakeCls (clos) ->
+      make_cls env clos
   | AppCls (a, al) ->
       app_cls env (atom env a) (List.map (atom env) al)
   | AppDir (Id.L id, al) ->
@@ -318,13 +312,6 @@ let rec f_tail env e =
       let a = emit_alloca (emit_type t) id v in
       (* don't need to zero out gcroot in tail position *)
       f_tail (M.add id a env) e2
-  | MakeCls ((Var id, t), clos, e) ->
-      let vclos = make_cls env (id, t) clos in
-      f_tail (M.add id vclos env) e
-  | MakeCls ((Root id, t), clos, e) ->
-      let vclos = make_cls env (id, t) clos in
-      let a = emit_alloca (emit_type t) id vclos in
-      f_tail (M.add id a env) e
   | AppCls (a, al) ->
       let inst = app_cls env (atom env a) (List.map (atom env) al) in
       set_tail_call true inst;

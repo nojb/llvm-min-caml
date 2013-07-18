@@ -1,4 +1,4 @@
-type closure = { entry : Id.l; actual_fv : Id.t list }
+type closure = { entry : Id.l * Type.t; actual_fv : Id.t list }
 type t = (* クロージャ変換後の式 (caml2html: closure_t) *)
   | Unit
   | Bool of bool
@@ -18,7 +18,7 @@ type t = (* クロージャ変換後の式 (caml2html: closure_t) *)
   | If of Id.t * t * t
   | Let of (Id.t * Type.t) * t * t
   | Var of Id.t
-  | MakeCls of (Id.t * Type.t) * closure * t
+  | MakeCls of closure
   | AppCls of Id.t * Id.t list
   | AppDir of Id.l * Id.t list
   | Tuple of Id.t list
@@ -42,7 +42,7 @@ let rec fv = function
   | If(x, e1, e2) -> S.add x (S.union (fv e1) (fv e2))
   | Let((x, t), e1, e2) -> S.union (fv e1) (S.remove x (fv e2))
   | Var(x) -> S.singleton x
-  | MakeCls((x, t), { entry = l; actual_fv = ys }, e) -> S.remove x (S.union (S.of_list ys) (fv e))
+  | MakeCls({ entry = l; actual_fv = ys }) -> S.of_list ys
   | AppCls(x, ys) -> S.of_list (x :: ys)
   | ExtFunApp (_, _, xs)
   | AppDir(_, xs) | Tuple(xs) -> S.of_list xs
@@ -95,7 +95,7 @@ let rec g env known = function (* クロージャ変換ルーチン本体 (caml2html: closure
       toplevel := { name = (Id.L(x), t); args = yts; formal_fv = zts; body = e1' } :: !toplevel; (* トップレベル関数を追加 *)
       let e2' = g env' known' e2 in
       if S.mem x (fv e2') then (* xが変数としてe2'に出現するか *)
-	MakeCls((x, t), { entry = Id.L(x); actual_fv = zs }, e2') (* 出現していたら削除しない *)
+	Let ((x, t), MakeCls { entry = (Id.L(x), t); actual_fv = zs }, e2') (* 出現していたら削除しない *)
       else
 	(Format.eprintf "eliminating closure(s) %s@." x;
 	 e2') (* 出現しなければMakeClsを削除 *)

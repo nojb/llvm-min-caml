@@ -2,7 +2,7 @@ type atom =
   | Var of Id.t
   | Root of Id.t
 
-type closure = { entry : Id.l; actual_fv : atom list }
+type closure = { entry : Id.l * Type.t; actual_fv : atom list }
 
 type t =
   | Unit
@@ -23,7 +23,7 @@ type t =
   | If of atom * t * t
   | Let of (atom * Type.t) * t * t
   | Atom of atom
-  | MakeCls of (atom * Type.t) * closure * t
+  | MakeCls of closure
   | AppCls of atom * atom list
   | AppDir of Id.l * atom list
   | Tuple of atom list
@@ -73,10 +73,8 @@ let rec roots e =
   | Closure.Let ((id, _), _, e2) ->
       S.remove id (roots e2)
   | Closure.Var _ -> S.empty
-  | Closure.MakeCls ((id, _), clos, e) ->
-      S.remove id (S.union
-        (S.of_list clos.Closure.actual_fv)
-        (Closure.fv e))
+  | Closure.MakeCls (clos) ->
+      S.of_list clos.Closure.actual_fv
   | Closure.AppCls _ | Closure.AppDir _ -> S.empty
   | Closure.Tuple (idl) ->
       S.of_list idl
@@ -126,10 +124,9 @@ let rec g env = function
       Let ((v, t), g env e1, g env' e2)
   | Closure.Var (x) ->
       Atom (g_atom env x)
-  | Closure.MakeCls ((id, t), clos, e) ->
-      let v, env' = add id t env (roots e) in
-      MakeCls ((v, t), { entry = clos.Closure.entry; actual_fv =
-        List.map (g_atom env) clos.Closure.actual_fv }, g env' e)
+  | Closure.MakeCls (clos) ->
+      MakeCls ({ entry = clos.Closure.entry; actual_fv =
+        List.map (g_atom env) clos.Closure.actual_fv })
   | Closure.AppCls (x, idl) ->
       AppCls (g_atom env x, List.map (g_atom env) idl)
   | Closure.AppDir (x, idl) ->

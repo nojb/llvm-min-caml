@@ -2,7 +2,7 @@ type atom =
   | Var of Id.t
   | Root of Id.t
 
-type closure = { entry : Id.l; actual_fv : atom list }
+type closure = { entry : Id.l * Type.t; actual_fv : atom list }
 
 type t =
   | Unit
@@ -23,7 +23,7 @@ type t =
   | If of atom * t * t
   | Let of (atom * Type.t) * t * t
   | Atom of atom
-  | MakeCls of (atom * Type.t) * closure * t
+  | MakeCls of closure
   | AppCls of atom * atom list
   | AppDir of Id.l * atom list
   | Tuple of atom list
