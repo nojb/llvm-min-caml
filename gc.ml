@@ -1,3 +1,5 @@
+open Prim
+
 type atom =
   | Var of Id.t
   | Root of Id.t
@@ -9,48 +11,29 @@ type t =
   | Bool of bool
   | Int of int
   | Float of float
-  | Not of atom
-  | Neg of atom
-  | Add of atom * atom
-  | Sub of atom * atom
-  | FNeg of atom
-  | FAdd of atom * atom
-  | FSub of atom * atom
-  | FMul of atom * atom
-  | FDiv of atom * atom
-  | Eq of atom * atom
-  | LE of atom * atom
+  | Prim of primitive * atom list
   | If of atom * t * t
   | Let of (atom * Type.t) * t * t
   | Atom of atom
   | MakeCls of closure
   | AppCls of atom * atom list
   | AppDir of Id.l * atom list
-  | Tuple of atom list
   | LetTuple of (atom * Type.t) list * atom * t
-  | Array of atom * atom
-  | Get of atom * atom
-  | Put of atom * atom * atom
   | ExtArray of Id.l * Type.t
   | ExtFunApp of Id.l * Type.t * atom list
 
 let rec triggers = function
   | Closure.Unit | Closure.Bool(_) | Closure.Int(_)
-  | Closure.Float(_) | Closure.Not(_)
-  | Closure.Neg(_) | Closure.Add _
-  | Closure.Sub(_, _) | Closure.FNeg(_)
-  | Closure.FAdd _ | Closure.FSub _
-  | Closure.FMul _ | Closure.FDiv _
-  | Closure.Eq _ | Closure.LE _ -> false
+  | Closure.Float(_) -> false
+  | Closure.Prim (Pmakearray, _)
+  | Closure.Prim (Pmaketuple, _) -> true
+  | Closure.Prim _ -> false
   | Closure.If (_, e1, e2)
   | Closure.Let (_, e1, e2) -> triggers e1 || triggers e2
   | Closure.Var _ -> false
-  | Closure.MakeCls _
-  | Closure.AppCls _ | Closure.AppDir _
-  | Closure.Tuple _ -> true
+  | Closure.MakeCls _ -> true
+  | Closure.AppCls _ | Closure.AppDir _ -> false
   | Closure.LetTuple (_, _, e) -> triggers e
-  | Closure.Array _ -> true
-  | Closure.Get _ | Closure.Put _
   | Closure.ExtArray _ -> false
   | Closure.ExtFunApp _ -> false
     (* is this right? could an external function allocate memory!? *)
@@ -61,11 +44,10 @@ let remove_list l s =
 let rec roots e =
   match e with
   | Closure.Unit | Closure.Bool _ | Closure.Int _
-  | Closure.Float _ | Closure.Not _ | Closure.Neg _
-  | Closure.Add _ | Closure.Sub _ | Closure.FNeg _
-  | Closure.FAdd _ | Closure.FSub _ | Closure.FMul _
-  | Closure.FDiv _ | Closure.Eq _ | Closure.LE _ ->
-      S.empty
+  | Closure.Float _ -> S.empty
+  | Closure.Prim (Pmakearray, xs)
+  | Closure.Prim (Pmaketuple, xs) -> S.of_list xs
+  | Closure.Prim _ -> S.empty
   | Closure.If (_, e1, e2) ->
       S.union (roots e1) (roots e2)
   | Closure.Let ((id, _), e1, e2) when triggers e1 ->
@@ -76,13 +58,8 @@ let rec roots e =
   | Closure.MakeCls (clos) ->
       S.of_list clos.Closure.actual_fv
   | Closure.AppCls _ | Closure.AppDir _ -> S.empty
-  | Closure.Tuple (idl) ->
-      S.of_list idl
   | Closure.LetTuple (idtl, _, e) ->
       remove_list (List.map (fun (id, _) -> id) idtl) (roots e)
-  | Closure.Array (x, y) ->
-      S.of_list [x; y]
-  | Closure.Get _ | Closure.Put _
   | Closure.ExtArray _ | Closure.ExtFunApp _ -> S.empty
 
 let is_gc_type = function
@@ -106,17 +83,7 @@ let rec g env = function
   | Closure.Bool(b) -> Bool(b)
   | Closure.Int(n) -> Int(n)
   | Closure.Float(f) -> Float(f)
-  | Closure.Not(x) -> Not(Var x)
-  | Closure.Neg(x) -> Neg(Var x)
-  | Closure.Add(x, y) -> Add(Var x, Var y)
-  | Closure.Sub(x, y) -> Sub(Var x, Var y)
-  | Closure.FNeg(x) -> FNeg(Var x)
-  | Closure.FAdd(x, y) -> FAdd(Var x, Var y)
-  | Closure.FSub(x, y) -> FSub(Var x, Var y)
-  | Closure.FMul(x, y) -> FMul(Var x, Var y)
-  | Closure.FDiv(x, y) -> FDiv(Var x, Var y)
-  | Closure.Eq (x, y) -> Eq (g_atom env x, g_atom env y)
-  | Closure.LE (x, y) -> LE (g_atom env x, g_atom env y)
+  | Closure.Prim (p, xs) -> Prim (p, List.map (g_atom env) xs)
   | Closure.If (x, e1, e2) ->
       If (Var x, g env e1, g env e2)
   | Closure.Let ((x, t), e1, e2) ->
@@ -131,9 +98,6 @@ let rec g env = function
       AppCls (g_atom env x, List.map (g_atom env) idl)
   | Closure.AppDir (x, idl) ->
       AppDir (x, List.map (g_atom env) idl)
-  | Closure.Tuple (idl) ->
-      let al = List.map (g_atom env) idl in
-      Tuple (al)
   | Closure.LetTuple (idtl, x, e) ->
       let x = g_atom env x in
       let r = roots e in
@@ -144,12 +108,6 @@ let rec g env = function
             let v, env' = add id t env r in
             loop env' ((v, t) :: yl) rest
       in loop env [] idtl
-  | Closure.Array (x, y) ->
-      Array (Var x, g_atom env y)
-  | Closure.Get (x, y) ->
-      Get (g_atom env x, Var y)
-  | Closure.Put (x, y, z) ->
-      Put (g_atom env x, Var y, g_atom env z)
   | Closure.ExtArray (x, t) ->
       ExtArray (x, t)
   | Closure.ExtFunApp (x, t, idl) ->

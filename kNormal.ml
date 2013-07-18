@@ -1,3 +1,5 @@
+open Prim
+
 (* give names to intermediate values (K-normalization) *)
 
 type t = (* K正規化後の式 (caml2html: knormal_t) *)
@@ -5,36 +7,20 @@ type t = (* K正規化後の式 (caml2html: knormal_t) *)
   | Bool of bool
   | Int of int
   | Float of float
-  | Not of Id.t
-  | Neg of Id.t
-  | Add of Id.t * Id.t
-  | Sub of Id.t * Id.t
-  | FNeg of Id.t
-  | FAdd of Id.t * Id.t
-  | FSub of Id.t * Id.t
-  | FMul of Id.t * Id.t
-  | FDiv of Id.t * Id.t
-  | Eq of Id.t * Id.t
-  | LE of Id.t * Id.t
+  | Prim of Prim.primitive * Id.t list
   | If of Id.t * t * t
   | Let of (Id.t * Type.t) * t * t
   | Var of Id.t
   | LetRec of fundef * t
   | App of Id.t * Id.t list
-  | Tuple of Id.t list
   | LetTuple of (Id.t * Type.t) list * Id.t * t
-  | Array of Id.t * Id.t
-  | Get of Id.t * Id.t
-  | Put of Id.t * Id.t * Id.t
   | ExtArray of Id.t * Type.t
   | ExtFunApp of Id.t * Type.t * Id.t list
 and fundef = { name : Id.t * Type.t; args : (Id.t * Type.t) list; body : t }
 
 let rec fv = function (* 式に出現する（自由な）変数 (caml2html: knormal_fv) *)
   | Unit | Bool _ | Int(_) | Float(_) | ExtArray(_, _) -> S.empty
-  | Not(x) | Neg(x) | FNeg(x) -> S.singleton x
-  | Array (x, y) | LE (x, y) | Eq (x, y)
-  | Add(x, y) | Sub(x, y) | FAdd(x, y) | FSub(x, y) | FMul(x, y) | FDiv(x, y) | Get(x, y) -> S.of_list [x; y]
+  | Prim (_, xs) -> S.of_list xs
   | If(x, e1, e2) -> S.add x (S.union (fv e1) (fv e2))
   | Let((x, t), e1, e2) -> S.union (fv e1) (S.remove x (fv e2))
   | Var(x) -> S.singleton x
@@ -42,8 +28,7 @@ let rec fv = function (* 式に出現する（自由な）変数 (caml2html: knormal_fv) *)
       let zs = S.diff (fv e1) (S.of_list (List.map fst yts)) in
       S.diff (S.union zs (fv e2)) (S.singleton x)
   | App(x, ys) -> S.of_list (x :: ys)
-  | Tuple(xs) | ExtFunApp(_, _, xs) -> S.of_list xs
-  | Put(x, y, z) -> S.of_list [x; y; z]
+  | ExtFunApp(_, _, xs) -> S.of_list xs
   | LetTuple(xs, y, e) -> S.add y (S.diff (fv e) (S.of_list (List.map fst xs)))
 
 let insert_let (e, t) k = (* letを挿入する補助関数 (caml2html: knormal_insert) *)
@@ -61,45 +46,45 @@ let rec g env = function (* K正規化ルーチン本体 (caml2html: knormal_g) *)
   | Syntax.Float(d) -> Float(d), Type.Float
   | Syntax.Not(e) ->
       insert_let (g env e) (fun x ->
-        Not x, Type.Bool)
+        Prim (Pnot, [x]), Type.Bool)
   | Syntax.Neg(e) ->
       insert_let (g env e)
-	(fun x -> Neg(x), Type.Int)
+    (fun x -> Prim (Pnegint, [x]), Type.Int)
   | Syntax.Add(e1, e2) -> (* 足し算のK正規化 (caml2html: knormal_add) *)
       insert_let (g env e1)
 	(fun x -> insert_let (g env e2)
-	    (fun y -> Add(x, y), Type.Int))
+	    (fun y -> Prim (Paddint, [x; y]), Type.Int))
   | Syntax.Sub(e1, e2) ->
       insert_let (g env e1)
 	(fun x -> insert_let (g env e2)
-	    (fun y -> Sub(x, y), Type.Int))
+    (fun y -> Prim (Psubint, [x; y]), Type.Int))
   | Syntax.FNeg(e) ->
       insert_let (g env e)
-	(fun x -> FNeg(x), Type.Float)
+    (fun x -> Prim (Pnegfloat, [x]), Type.Float)
   | Syntax.FAdd(e1, e2) ->
       insert_let (g env e1)
 	(fun x -> insert_let (g env e2)
-	    (fun y -> FAdd(x, y), Type.Float))
+    (fun y -> Prim (Paddfloat, [x; y]), Type.Float))
   | Syntax.FSub(e1, e2) ->
       insert_let (g env e1)
 	(fun x -> insert_let (g env e2)
-	    (fun y -> FSub(x, y), Type.Float))
+    (fun y -> Prim (Psubfloat, [x; y]), Type.Float))
   | Syntax.FMul(e1, e2) ->
       insert_let (g env e1)
 	(fun x -> insert_let (g env e2)
-	    (fun y -> FMul(x, y), Type.Float))
+	    (fun y -> Prim (Pmulfloat, [x; y]), Type.Float))
   | Syntax.FDiv(e1, e2) ->
       insert_let (g env e1)
 	(fun x -> insert_let (g env e2)
-	    (fun y -> FDiv(x, y), Type.Float))
+	    (fun y -> Prim (Pdivfloat, [x; y]), Type.Float))
   | Syntax.Eq (e1, e2) ->
       insert_let (g env e1) (fun x ->
   insert_let (g env e2) (fun y ->
-      Eq (x, y), Type.Bool))
+      Prim (Ptest Peq_test, [x; y]), Type.Bool))
   | Syntax.LE (e1, e2) ->
       insert_let (g env e1) (fun x ->
-    insert_let (g env e2) (fun y ->
-        LE (x, y), Type.Bool))
+    insert_let (g env e2) (fun y -> (* XXX only handles integer LE *)
+        Prim (Ptest (Pint_test PTle), [x; y]), Type.Bool))
   | Syntax.If(e1, e2, e3) ->
       insert_let (g env e1) (fun x ->
         let e2', t2 = g env e2 in
@@ -143,7 +128,7 @@ let rec g env = function (* K正規化ルーチン本体 (caml2html: knormal_g) *)
       | _ -> assert false)
   | Syntax.Tuple(es) ->
       let rec bind xs ts = function (* "xs" and "ts" are identifiers and types for the elements *)
-	| [] -> Tuple(xs), Type.Tuple(ts)
+	| [] -> Prim (Pmaketuple, xs), Type.Tuple(ts)
 	| e :: es ->
 	    let _, t as g_e = g env e in
 	    insert_let g_e
@@ -160,7 +145,7 @@ let rec g env = function (* K正規化ルーチン本体 (caml2html: knormal_g) *)
 	  let _, t2 as g_e2 = g env e2 in
 	  insert_let g_e2
 	    (fun y ->
-        Array(x, y), Type.Array(t2)))
+        Prim (Pmakearray, [x; y]), Type.Array(t2)))
 	      (* let l =
 		match t2 with
 		| Type.Float -> "create_float_array"
@@ -171,12 +156,12 @@ let rec g env = function (* K正規化ルーチン本体 (caml2html: knormal_g) *)
       |	_, Type.Array(t) as g_e1 ->
 	  insert_let g_e1
 	    (fun x -> insert_let (g env e2)
-		(fun y -> Get(x, y), t))
+		(fun y -> Prim (Pget, [x; y]), t))
       | _ -> assert false)
   | Syntax.Put(e1, e2, e3) ->
       insert_let (g env e1)
 	(fun x -> insert_let (g env e2)
 	    (fun y -> insert_let (g env e3)
-		(fun z -> Put(x, y, z), Type.Unit)))
+		(fun z -> Prim (Pput, [x; y; z]), Type.Unit)))
 
 let f e = fst (g M.empty e)

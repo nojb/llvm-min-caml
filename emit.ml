@@ -1,5 +1,6 @@
 open Llvm
 open Gc
+open Prim
 
 let the_module : llmodule option ref = ref None
 let the_builder = builder (global_context ())
@@ -163,6 +164,7 @@ let get_eq_op x y =
       failwith (Printf.sprintf "Emit.get_eq_op: unexpected operand types (%s, %s)"
         (string_of_lltype (type_of x)) (string_of_lltype (type_of y)))
 
+(*
 let get_le_op x y =
   match classify_type (type_of x), classify_type (type_of y) with
   | TypeKind.Integer, TypeKind.Integer -> build_icmp Icmp.Sle x y
@@ -174,6 +176,7 @@ let get_le_op x y =
   | _, _ ->
       failwith (Printf.sprintf "Emit.get_le_op: unexpected operand types (%s, %s)"
         (string_of_lltype (type_of x)) (string_of_lltype (type_of y)))
+        *)
 
 let rec f_nontail env e =
   match e with
@@ -185,28 +188,30 @@ let rec f_nontail env e =
       const_int 32 n
   | Float f ->
       const_float (double_type (global_context ())) f
-  | Not a ->
+  | Prim (Pnot, [a]) ->
       build_not (atom env a) "" the_builder
-  | Neg a ->
+  | Prim (Pnegint, [a]) ->
       build_neg (atom env a) "" the_builder
-  | Add (a1, a2) ->
+  | Prim (Paddint, [a1; a2]) ->
       build_add (atom env a1) (atom env a2) "" the_builder
-  | Sub (a1, a2) ->
+  | Prim (Psubint, [a1; a2]) ->
       build_sub (atom env a1) (atom env a2) "" the_builder
-  | FNeg (a) ->
+  | Prim (Pnegfloat, [a]) ->
       build_fneg (atom env a) "" the_builder
-  | FAdd (a1, a2) ->
+  | Prim (Paddfloat, [a1; a2]) ->
       build_fadd (atom env a1) (atom env a2) "" the_builder
-  | FSub (a1, a2) ->
+  | Prim (Psubfloat, [a1; a2]) ->
       build_fsub (atom env a1) (atom env a2) "" the_builder
-  | FMul (a1, a2) ->
+  | Prim (Pmulfloat, [a1; a2]) ->
       build_fmul (atom env a1) (atom env a2) "" the_builder
-  | FDiv (a1, a2) ->
+  | Prim (Pdivfloat, [a1; a2]) ->
       build_fdiv (atom env a1) (atom env a2) "" the_builder
-  | Eq (a1, a2) ->
+  | Prim (Ptest Peq_test, [a1; a2]) ->
       (get_eq_op (atom env a1) (atom env a2)) "" the_builder
-  | LE (a1, a2) ->
-      (get_le_op (atom env a1) (atom env a2)) "" the_builder
+  | Prim (Ptest (Pint_test PTle), [a1; a2]) ->
+      build_icmp Icmp.Sle (atom env a1) (atom env a2) "" the_builder
+  | Prim (Ptest (Pfloat_test PTle), [a1; a2]) ->
+      build_fcmp Fcmp.Ole (atom env a1) (atom env a2) "" the_builder
   | If (a, e1, e2) ->
       f_if_nontail env (atom env a) e1 e2
   (* | IfEq (id1, id2, e1, e2) ->
@@ -234,7 +239,7 @@ let rec f_nontail env e =
       app_cls env (atom env a) (List.map (atom env) al)
   | AppDir (Id.L id, al) ->
       app_dir env id (List.map (atom env) al)
-  | Tuple (al) ->
+  | Prim (Pmaketuple, al) ->
       let values = Array.of_list (List.map (atom env) al) in
       let tuple_types = Array.map type_of values in
       let tuple_type = struct_type (global_context ()) tuple_types in
@@ -250,7 +255,7 @@ let rec f_nontail env e =
   | LetTuple (atl, a, e) ->
       let env = let_tuple env atl (atom env a) in
       f_nontail env e (* should zero out the gcroots afterwards XXX *)
-  | Array (a1, a2) ->
+  | Prim (Pmakearray, [a1; a2]) ->
       let v1 = atom env a1 in
       let v2 = atom env a2 in
       let t2 = type_of v2 in
@@ -258,10 +263,10 @@ let rec f_nontail env e =
       let v = build_pointercast v (pointer_type t2) "" the_builder in
       initialise_array v v1 v2;
       v
-  | Get (a1, a2) ->
+  | Prim (Pget, [a1; a2]) ->
       build_load (build_gep (atom env a1)
         [| atom env a2 |] "" the_builder) "" the_builder
-  | Put (a1, a2, a3) ->
+  | Prim (Pput, [a1; a2; a3]) ->
       ignore (build_store (atom env a3) (build_gep (atom env a1)
         [| atom env a2 |] "" the_builder) the_builder);
       const_int 32 0
@@ -275,6 +280,8 @@ let rec f_nontail env e =
         (function_type (emit_type t)
           (Array.of_list tl)) (get_module ()) in
       build_call f (Array.of_list vl) "" the_builder
+  | Prim _ ->
+      failwith "Emit: unrecognised primitive (or its arity)"
 
 and f_if_nontail env c e1 e2 =
   let bb_yay = new_block "yes" in
