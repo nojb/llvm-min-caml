@@ -1,5 +1,5 @@
 open Llvm
-open Closure
+open Gc
 
 let the_module : llmodule option ref = ref None
 let the_builder = builder (global_context ())
@@ -57,8 +57,26 @@ let rec emit_type = function
   | Type.Var _ ->
       failwith "Emit.emit_type: Var type"
 
+let atom env a =
+  match a with
+  | Var id -> M.find id env
+  | Root id -> build_load (M.find id env) id the_builder
+
+let emit_alloca t id v =
+  let b = builder_at_end (global_context ())
+    (entry_block (block_parent (insertion_block the_builder))) in
+  let a = build_alloca t id b in
+  ignore (build_call (declare_function "llvm.gcroot"
+    (function_type (void_type (global_context ()))
+      [| pointer_type (pointer_type (int_t 8)); pointer_type (int_t 8) |])
+    (get_module ()))
+    [| build_pointercast a (pointer_type (pointer_type (int_t 8))) "" b;
+      const_null (pointer_type (int_t 8)) |] "" b);
+  ignore (build_store v a the_builder);
+  a
+
 let make_cls env (id, t) clos =
-  let actual_fv = List.map (fun x -> M.find x env) clos.actual_fv in
+  let actual_fv = List.map (atom env) clos.actual_fv in
   let tl, t =
     (match t with Type.Fun (tl, t) -> tl, t | _ -> assert false) in
   let fn_type = 
@@ -84,17 +102,21 @@ let make_cls env (id, t) clos =
     (pointer_type (struct_type (global_context ())
       [| pointer_type fn_type |])) id the_builder
 
-let let_tuple env idtl id =
-  let tuple = M.find id env in
+let let_tuple env atl tuple =
   let rec loop env i = function
     | [] -> env
-    | (id1, _) :: rest ->
+    | (Var id1, _) :: rest ->
         loop (M.add id1 (build_load
           (build_gep tuple [| const_int 32 0; const_int 32 i |] id1 the_builder)
             id1 the_builder) env) (i+1) rest
-  in loop env 0 idtl
+    | (Root id1, t) :: rest ->
+        let a = emit_alloca (emit_type t) id1
+          (build_load (build_gep tuple [| const_int 32 0; const_int 32 i |] id1 the_builder)
+            id1 the_builder) in
+        loop (M.add id1 a env) (i+1) rest
+  in loop env 0 atl
 
-let app_dir env id idl =
+let app_dir env id vl =
   let f = get_function id in
   (* let copy_of_fnptr = build_alloca (type_of f) "" b in
   ignore (build_store f copy_of_fnptr b);
@@ -102,16 +124,14 @@ let app_dir env id idl =
     (pointer_type (int_t 8)) "" b in *)
   let copy_of_fnptr = const_null (pointer_type (int_t 8)) in (* XXX *)
   build_call f
-    (Array.of_list (copy_of_fnptr ::
-      List.map (fun x -> M.find x env) idl)) "" the_builder
+    (Array.of_list (copy_of_fnptr :: vl)) "" the_builder
 
-let app_cls env id idl =
-  let clos = M.find id env in
+let app_cls env clos vl =
   let f = build_gep clos [| const_int 32 0; const_int 32 0 |] "" the_builder in
   let f = build_load f "" the_builder in
   build_call f
     (Array.of_list (build_pointercast clos (pointer_type (int_t 8)) ""
-      the_builder :: List.map (fun x -> M.find x env) idl)) "" the_builder
+      the_builder :: vl)) "" the_builder
 
 let initialise_array va vlen vinit =
   let bbcurr = insertion_block the_builder in
@@ -164,82 +184,98 @@ let rec f_nontail env e =
       const_int 32 n
   | Float f ->
       const_float (double_type (global_context ())) f
-  | Not id ->
-      build_not (M.find id env) "" the_builder
-  | Neg id ->
-      build_neg (M.find id env) "" the_builder
-  | Add (id1, id2) ->
-      build_add (M.find id1 env) (M.find id2 env) "" the_builder
-  | Sub (id1, id2) ->
-      build_sub (M.find id1 env) (M.find id2 env) "" the_builder
-  | FNeg (id) ->
-      build_fneg (M.find id env) "" the_builder
-  | FAdd (id1, id2) ->
-      build_fadd (M.find id1 env) (M.find id2 env) "" the_builder
-  | FSub (id1, id2) ->
-      build_fsub (M.find id1 env) (M.find id2 env) "" the_builder
-  | FMul (id1, id2) ->
-      build_fmul (M.find id1 env) (M.find id2 env) "" the_builder
-  | FDiv (id1, id2) ->
-      build_fdiv (M.find id1 env) (M.find id2 env) "" the_builder
-  | Eq (id1, id2) ->
-      (get_eq_op (M.find id1 env) (M.find id2 env)) "" the_builder
-  | LE (id1, id2) ->
-      (get_le_op (M.find id1 env) (M.find id2 env)) "" the_builder
-  | If (id, e1, e2) ->
-      f_if_nontail env (M.find id env) e1 e2
+  | Not a ->
+      build_not (atom env a) "" the_builder
+  | Neg a ->
+      build_neg (atom env a) "" the_builder
+  | Add (a1, a2) ->
+      build_add (atom env a1) (atom env a2) "" the_builder
+  | Sub (a1, a2) ->
+      build_sub (atom env a1) (atom env a2) "" the_builder
+  | FNeg (a) ->
+      build_fneg (atom env a) "" the_builder
+  | FAdd (a1, a2) ->
+      build_fadd (atom env a1) (atom env a2) "" the_builder
+  | FSub (a1, a2) ->
+      build_fsub (atom env a1) (atom env a2) "" the_builder
+  | FMul (a1, a2) ->
+      build_fmul (atom env a1) (atom env a2) "" the_builder
+  | FDiv (a1, a2) ->
+      build_fdiv (atom env a1) (atom env a2) "" the_builder
+  | Eq (a1, a2) ->
+      (get_eq_op (atom env a1) (atom env a2)) "" the_builder
+  | LE (a1, a2) ->
+      (get_le_op (atom env a1) (atom env a2)) "" the_builder
+  | If (a, e1, e2) ->
+      f_if_nontail env (atom env a) e1 e2
   (* | IfEq (id1, id2, e1, e2) ->
       f_if_nontail b env (build_icmp Icmp.Eq (M.find id1 env)
         (M.find id2 env) "" b) e1 e2
   | IfLE (id1, id2, e1, e2) ->
       f_if_nontail b env (build_icmp Icmp.Sle (M.find id1 env)
         (M.find id2 env) "" b) e1 e2 *)
-  | Let ((id, _), e1, e2) ->
+  | Let ((Var id, _), e1, e2) ->
       let v = f_nontail env e1 in
       set_value_name id v;
       f_nontail (M.add id v env) e2
-  | Var id ->
-      M.find id env
-  | MakeCls ((id, t), clos, e) ->
+  | Let ((Root id, t), e1, e2) ->
+      let v = f_nontail env e1 in
+      set_value_name id v;
+      let a = emit_alloca (emit_type t) id v in
+      let res = f_nontail (M.add id a env) e2 in
+      ignore (build_store (const_null (emit_type t)) a the_builder);
+      res
+  | Atom a ->
+      atom env a
+  | MakeCls ((Var id, t), clos, e) ->
       let vclos = make_cls env (id, t) clos in
       f_nontail (M.add id vclos env) e
-  | AppCls (id, idl) ->
-      app_cls env id idl
-  | AppDir (Id.L id, idl) ->
-      app_dir env id idl
-  | Tuple (idl) ->
-      let values = Array.of_list (List.map (fun x -> M.find x env) idl) in
+  | MakeCls ((Root id, t), clos, e) ->
+      let vclos = make_cls env (id, t) clos in
+      let a = emit_alloca (emit_type t) id vclos in
+      let res = f_nontail (M.add id a env) e in
+      ignore (build_store (const_null (emit_type t)) a the_builder);
+      res
+  | AppCls (a, al) ->
+      app_cls env (atom env a) (List.map (atom env) al)
+  | AppDir (Id.L id, al) ->
+      app_dir env id (List.map (atom env) al)
+  | Tuple (al) ->
+      let values = Array.of_list (List.map (atom env) al) in
       let tuple_types = Array.map type_of values in
       let tuple_type = struct_type (global_context ()) tuple_types in
       let tuple = build_malloc tuple_type "" the_builder in
+      (* FIXME XXX the malloc should come BEFORE the atom env a's so that
+       * they are loaded after the malloc! - otherwise there is not
+       * much point in spilling them to the stack. *)
       Array.iteri (fun i v ->
         ignore (build_store v
           (build_gep tuple [| const_int 32 0; const_int 32 i |] "" the_builder)
             the_builder)) values;
       tuple
-  | LetTuple (idtl, id, e) ->
-      let env = let_tuple env idtl id in
-      f_nontail env e
-  | Array (id1, id2) ->
-      let v1 = M.find id1 env in
-      let v2 = M.find id2 env in
+  | LetTuple (atl, a, e) ->
+      let env = let_tuple env atl (atom env a) in
+      f_nontail env e (* should zero out the gcroots afterwards XXX *)
+  | Array (a1, a2) ->
+      let v1 = atom env a1 in
+      let v2 = atom env a2 in
       let t2 = type_of v2 in
       let v = build_array_malloc t2 v1 "" the_builder in
       let v = build_pointercast v (pointer_type t2) "" the_builder in
       initialise_array v v1 v2;
       v
-  | Get (id1, id2) ->
-      build_load (build_gep (M.find id1 env)
-        [| M.find id2 env |] "" the_builder) "" the_builder
-  | Put (id1, id2, id3) ->
-      ignore (build_store (M.find id3 env) (build_gep (M.find id1 env)
-        [| M.find id2 env |] "" the_builder) the_builder);
+  | Get (a1, a2) ->
+      build_load (build_gep (atom env a1)
+        [| atom env a2 |] "" the_builder) "" the_builder
+  | Put (a1, a2, a3) ->
+      ignore (build_store (atom env a3) (build_gep (atom env a1)
+        [| atom env a2 |] "" the_builder) the_builder);
       const_int 32 0
   | ExtArray (Id.L id, t) ->
       build_load (declare_global (pointer_type (emit_type t)) id
         (get_module ())) id the_builder
-  | ExtFunApp (Id.L id, t, idl) ->
-      let vl = List.map (fun x -> M.find x env) idl in
+  | ExtFunApp (Id.L id, t, al) ->
+      let vl = List.map (atom env) al in
       let tl = List.map type_of vl in
       let f = declare_function id
         (function_type (emit_type t)
@@ -264,31 +300,41 @@ and f_if_nontail env c e1 e2 =
 
 let rec f_tail env e =
   match e with
-  | If (id, e1, e2) ->
-      f_if_tail env (M.find id env) e1 e2
+  | If (a, e1, e2) ->
+      f_if_tail env (atom env a) e1 e2
   (* | IfEq (id1, id2, e1, e2) ->
       f_if_tail b env (build_icmp Icmp.Eq (M.find id1 env)
         (M.find id2 env) "" b) e1 e2
   | IfLE (id1, id2, e1, e2) ->
       f_if_tail b env (build_icmp Icmp.Sle (M.find id1 env)
         (M.find id2 env) "" b) e1 e2 *)
-  | Let ((id, _), e1, e2) ->
+  | Let ((Var id, _), e1, e2) ->
       let v = f_nontail env e1 in
       set_value_name id v;
       f_tail (M.add id v env) e2
-  | MakeCls ((id, t), clos, e) ->
+  | Let ((Root id, t), e1, e2) ->
+      let v = f_nontail env e1 in
+      set_value_name id v;
+      let a = emit_alloca (emit_type t) id v in
+      (* don't need to zero out gcroot in tail position *)
+      f_tail (M.add id a env) e2
+  | MakeCls ((Var id, t), clos, e) ->
       let vclos = make_cls env (id, t) clos in
       f_tail (M.add id vclos env) e
-  | AppCls (id, idl) ->
-      let inst = app_cls env id idl in
+  | MakeCls ((Root id, t), clos, e) ->
+      let vclos = make_cls env (id, t) clos in
+      let a = emit_alloca (emit_type t) id vclos in
+      f_tail (M.add id a env) e
+  | AppCls (a, al) ->
+      let inst = app_cls env (atom env a) (List.map (atom env) al) in
       set_tail_call true inst;
       ignore (build_ret inst the_builder)
-  | AppDir (Id.L id, idl) ->
-      let inst = app_dir env id idl in
+  | AppDir (Id.L id, al) ->
+      let inst = app_dir env id (List.map (atom env) al) in
       set_tail_call true inst;
       ignore (build_ret inst the_builder)
-  | LetTuple (idtl, id, e) ->
-      let env = let_tuple env idtl id in
+  | LetTuple (atl, a, e) ->
+      let env = let_tuple env atl (atom env a) in
       f_tail env e
   | _ ->
       let v = f_nontail env e in
@@ -325,29 +371,50 @@ let get_closure_type fn =
 
 let emit_fn_body fn =
   let Id.L name, t = fn.name in
+  Printf.eprintf "emitting llvm bitcode for %s\n" name;
   let f = get_function name in
-  position_at_end (entry_block f) the_builder;
+  position_at_end (entry_block f) the_builder; (* this is needed so that the
+  new_block "start" below works! *)
+  let start = new_block "start" in
+  position_at_end start the_builder;
   (* let b = builder_at_end (global_context ()) (entry_block f) in *)
   let clos = build_pointercast (param f 0) (get_closure_type fn) "clos"
     the_builder in
   let env = M.add name clos M.empty in
   let rec loop env i = function
     | [] -> env
-    | (id, t) :: rest ->
+    | (Var id, _) :: rest ->
         loop (M.add id
           (build_load
             (build_gep clos [| const_int 32 0; const_int 32 i |] id the_builder)
               id the_builder) env) (i+1) rest
+    | (Root id, t) :: rest ->
+        let a = emit_alloca (emit_type t) id
+          (build_load
+            (build_gep clos [| const_int 32 0; const_int 32 i |] id the_builder)
+              id the_builder) in
+        loop (M.add id a env) (i+1) rest
   in let env = loop env 1 fn.formal_fv in
+  Printf.eprintf "done with first loop for %s\n" name;
   let rec loop env i = function
     | [] -> env
-    | (id, _) :: rest ->
+    | (Var id, _) :: rest ->
         set_value_name id (param f i);
-        loop (M.add id (param f i) env) (i+1) rest in
+        loop (M.add id (param f i) env) (i+1) rest
+    | (Root id, t) :: rest ->
+        set_value_name id (param f i);
+        let a = emit_alloca (emit_type t) id (param f i) in
+        set_value_name id a;
+        loop (M.add id a env) (i+1) rest in
   let env = loop env 1 fn.args in
-  f_tail env fn.body
+  Printf.eprintf "done with second loop for %s\n" name;
+  flush stderr;
+  f_tail env fn.body;
+  position_at_end (entry_block f) the_builder;
+  ignore (build_br start the_builder)
 
 let f oc (Prog(fundefs, e)) =
+  (* XXX fix gcroots in main () *)
   initialise ();
   List.iter emit_fn_header fundefs;
   List.iter emit_fn_body fundefs;
