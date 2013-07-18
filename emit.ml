@@ -354,6 +354,7 @@ let get_function_type fn =
 let emit_fn_header fn =
   let Id.L name, t = fn.name in
   let f = define_function name (get_function_type fn) (get_module ()) in
+  set_gc (Some "shadow-stack") f;
   set_function_call_conv CallConv.fast f;
   set_linkage Linkage.Internal f
 
