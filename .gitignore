@@ -9,3 +9,6 @@ test/*.bc
 shootout/*.s
 shootout/*.ll
 shootout/*.bc
+min-rt/*.s
+min-rt/*.ll
+min-rt/*.bc
