@@ -4,8 +4,10 @@ let find x env = try M.find x env with Not_found -> x (* 置換のための関数 (caml2
 
 let rec g env = function (* β簡約ルーチン本体 (caml2html: beta_g) *)
   | Unit -> Unit
+  | Bool(b) -> Bool(b)
   | Int(i) -> Int(i)
   | Float(d) -> Float(d)
+  | Not(x) -> Not(find x env)
   | Neg(x) -> Neg(find x env)
   | Add(x, y) -> Add(find x env, find y env)
   | Sub(x, y) -> Sub(find x env, find y env)
@@ -14,8 +16,9 @@ let rec g env = function (* β簡約ルーチン本体 (caml2html: beta_g) *)
   | FSub(x, y) -> FSub(find x env, find y env)
   | FMul(x, y) -> FMul(find x env, find y env)
   | FDiv(x, y) -> FDiv(find x env, find y env)
-  | IfEq(x, y, e1, e2) -> IfEq(find x env, find y env, g env e1, g env e2)
-  | IfLE(x, y, e1, e2) -> IfLE(find x env, find y env, g env e1, g env e2)
+  | Eq(x, y) -> Eq(find x env, find y env)
+  | LE(x, y) -> LE(find x env, find y env)
+  | If(x, e1, e2) -> If(find x env, g env e1, g env e2)
   | Let((x, t), e1, e2) -> (* letのβ簡約 (caml2html: beta_let) *)
       (match g env e1 with
       | Var(y) ->

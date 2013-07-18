@@ -40,7 +40,7 @@ let int_t w =
 
 let rec emit_type = function
   | Type.Unit -> int_t 32
-  | Type.Bool -> int_t 32
+  | Type.Bool -> int_t 1
   | Type.Int ->  int_t 32
   | Type.Float -> double_type (global_context ())
   | Type.Fun (tl, t) ->
@@ -126,14 +126,42 @@ let initialise_array b va vlen vinit =
   ignore (build_br bbcond b);
   position_at_end bbdone b
 
+let get_eq_op x y =
+  match classify_type (type_of x), classify_type (type_of y) with
+  | TypeKind.Integer, TypeKind.Integer -> build_icmp Icmp.Eq x y
+  | TypeKind.Double, TypeKind.Double -> build_fcmp Fcmp.Oeq x y
+  | TypeKind.Pointer, TypeKind.Pointer ->
+      (fun s b -> build_icmp Icmp.Eq
+        (build_ptrtoint x (int_t 64) "" b)
+        (build_ptrtoint y (int_t 64) "" b) s b)
+  | _, _ ->
+      failwith (Printf.sprintf "Emit.get_eq_op: unexpected operand types (%s, %s)"
+        (string_of_lltype (type_of x)) (string_of_lltype (type_of y)))
+
+let get_le_op x y =
+  match classify_type (type_of x), classify_type (type_of y) with
+  | TypeKind.Integer, TypeKind.Integer -> build_icmp Icmp.Sle x y
+  | TypeKind.Double, TypeKind.Double -> build_fcmp Fcmp.Ole x y
+  | TypeKind.Pointer, TypeKind.Pointer ->
+      (fun s b -> build_icmp Icmp.Ule
+        (build_ptrtoint x (int_t 64) "" b)
+        (build_ptrtoint y (int_t 64) "" b) s b)
+  | _, _ ->
+      failwith (Printf.sprintf "Emit.get_le_op: unexpected operand types (%s, %s)"
+        (string_of_lltype (type_of x)) (string_of_lltype (type_of y)))
+
 let rec f_nontail b env e =
   match e with
   | Unit ->
       const_int 32 0
+  | Bool b ->
+      const_int 1 (if b then 1 else 0)
   | Int n ->
       const_int 32 n
   | Float f ->
       const_float (double_type (global_context ())) f
+  | Not id ->
+      build_not (M.find id env) "" b
   | Neg id ->
       build_neg (M.find id env) "" b
   | Add (id1, id2) ->
@@ -150,12 +178,18 @@ let rec f_nontail b env e =
       build_fmul (M.find id1 env) (M.find id2 env) "" b
   | FDiv (id1, id2) ->
       build_fdiv (M.find id1 env) (M.find id2 env) "" b
-  | IfEq (id1, id2, e1, e2) ->
+  | Eq (id1, id2) ->
+      (get_eq_op (M.find id1 env) (M.find id2 env)) "" b
+  | LE (id1, id2) ->
+      (get_le_op (M.find id1 env) (M.find id2 env)) "" b
+  | If (id, e1, e2) ->
+      f_if_nontail b env (M.find id env) e1 e2
+  (* | IfEq (id1, id2, e1, e2) ->
       f_if_nontail b env (build_icmp Icmp.Eq (M.find id1 env)
         (M.find id2 env) "" b) e1 e2
   | IfLE (id1, id2, e1, e2) ->
       f_if_nontail b env (build_icmp Icmp.Sle (M.find id1 env)
-        (M.find id2 env) "" b) e1 e2
+        (M.find id2 env) "" b) e1 e2 *)
   | Let ((id, _), e1, e2) ->
       let v = f_nontail b env e1 in
       set_value_name id v;
@@ -224,12 +258,14 @@ and f_if_nontail b env c e1 e2 =
 
 let rec f_tail b env e =
   match e with
-  | IfEq (id1, id2, e1, e2) ->
+  | If (id, e1, e2) ->
+      f_if_tail b env (M.find id env) e1 e2
+  (* | IfEq (id1, id2, e1, e2) ->
       f_if_tail b env (build_icmp Icmp.Eq (M.find id1 env)
         (M.find id2 env) "" b) e1 e2
   | IfLE (id1, id2, e1, e2) ->
       f_if_tail b env (build_icmp Icmp.Sle (M.find id1 env)
-        (M.find id2 env) "" b) e1 e2
+        (M.find id2 env) "" b) e1 e2 *)
   | Let ((id, _), e1, e2) ->
       let v = f_nontail b env e1 in
       set_value_name id v;

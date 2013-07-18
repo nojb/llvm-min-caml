@@ -1,5 +1,8 @@
 open KNormal
 
+let memb x env =
+  try (match M.find x env with Bool(_) -> true | _ -> false)
+  with Not_found -> false
 let memi x env =
   try (match M.find x env with Int(_) -> true | _ -> false)
   with Not_found -> false
@@ -10,6 +13,7 @@ let memt x env =
   try (match M.find x env with Tuple(_) -> true | _ -> false)
   with Not_found -> false
 
+let findb x env = (match M.find x env with Bool(b) -> b | _ -> raise Not_found)
 let findi x env = (match M.find x env with Int(i) -> i | _ -> raise Not_found)
 let findf x env = (match M.find x env with Float(d) -> d | _ -> raise Not_found)
 let findt x env = (match M.find x env with Tuple(ys) -> ys | _ -> raise Not_found)
@@ -18,6 +22,7 @@ let rec g env = function (* 定数畳み込みルーチン本体 (caml2html: constfold_g) *)
   | Var(x) when memi x env -> Int(findi x env)
   (* | Var(x) when memf x env -> Float(findf x env) *)
   (* | Var(x) when memt x env -> Tuple(findt x env) *)
+  | Not(x) when memb x env -> Bool(not (findb x env))
   | Neg(x) when memi x env -> Int(-(findi x env))
   | Add(x, y) when memi x env && memi y env -> Int(findi x env + findi y env) (* 足し算のケース (caml2html: constfold_add) *)
   | Sub(x, y) when memi x env && memi y env -> Int(findi x env - findi y env)
@@ -26,12 +31,20 @@ let rec g env = function (* 定数畳み込みルーチン本体 (caml2html: constfold_g) *)
   | FSub(x, y) when memf x env && memf y env -> Float(findf x env -. findf y env)
   | FMul(x, y) when memf x env && memf y env -> Float(findf x env *. findf y env)
   | FDiv(x, y) when memf x env && memf y env -> Float(findf x env /. findf y env)
-  | IfEq(x, y, e1, e2) when memi x env && memi y env -> if findi x env = findi y env then g env e1 else g env e2
+  | Eq(x, y) when memb x env && memb y env -> Bool(findb x env = findb y env)
+  | Eq(x, y) when memi x env && memi y env -> Bool(findi x env = findi y env)
+  | Eq(x, y) when memf x env && memf y env -> Bool(findf x env = findf y env)
+  | LE(x, y) when memb x env && memb y env -> Bool(findb x env = findb y env)
+  | LE(x, y) when memi x env && memi y env -> Bool(findi x env = findi y env)
+  | LE(x, y) when memf x env && memf y env -> Bool(findf x env = findf y env)
+  | If(x, e1, e2) when memb x env -> if findb x env then g env e1 else g env e2
+  | If(x, e1, e2) -> If(x, g env e1, g env e2)
+  (* | IfEq(x, y, e1, e2) when memi x env && memi y env -> if findi x env = findi y env then g env e1 else g env e2
   | IfEq(x, y, e1, e2) when memf x env && memf y env -> if findf x env = findf y env then g env e1 else g env e2
   | IfEq(x, y, e1, e2) -> IfEq(x, y, g env e1, g env e2)
   | IfLE(x, y, e1, e2) when memi x env && memi y env -> if findi x env <= findi y env then g env e1 else g env e2
   | IfLE(x, y, e1, e2) when memf x env && memf y env -> if findf x env <= findf y env then g env e1 else g env e2
-  | IfLE(x, y, e1, e2) -> IfLE(x, y, g env e1, g env e2)
+  | IfLE(x, y, e1, e2) -> IfLE(x, y, g env e1, g env e2) *)
   | Let((x, t), e1, e2) -> (* letのケース (caml2html: constfold_let) *)
       let e1' = g env e1 in
       let e2' = g (M.add x e1' env) e2 in
