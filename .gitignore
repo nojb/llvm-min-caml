@@ -6,3 +6,6 @@ _build
 test/*.s
 test/*.ll
 test/*.bc
+shootout/*.s
+shootout/*.ll
+shootout/*.bc

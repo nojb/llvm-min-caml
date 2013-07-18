@@ -73,13 +73,14 @@ compiler.
 4- Test the compiler.
 
 I will add a proper test suite in the future, but for now
-you can do the following.
+you can do the following to compile the test test/gcd.ml.
 
       ./main.native -iter 0 test/gcd
 
-This will produce some debug output and should leave create
-a file test/gcd.bc containing the LLVM bitcode. To actually
-see it, you can use the llvm-dis utility from the LLVM distribution.
+(the flag -iter 0 disables all optimizations so that the output
+is easier to read.) This will create a file test/gcd.bc containing
+the LLVM bitcode. To actually see it, you can use the llvm-dis utility
+from the LLVM distribution.
 
       llvm-dis < test/gcd.bc
 
