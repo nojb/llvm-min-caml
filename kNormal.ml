@@ -81,10 +81,16 @@ let rec g env = function (* K正規化ルーチン本体 (caml2html: knormal_g) *)
       insert_let (g env e1) (fun x ->
   insert_let (g env e2) (fun y ->
       Prim (Ptest Peq_test, [x; y]), Type.Bool))
-  | Syntax.LE (e1, e2) ->
+  | Syntax.LE (e1, e2, Type.Int) ->
       insert_let (g env e1) (fun x ->
-    insert_let (g env e2) (fun y -> (* XXX only handles integer LE *)
+    insert_let (g env e2) (fun y ->
         Prim (Ptest (Pint_test PTle), [x; y]), Type.Bool))
+  | Syntax.LE (e1, e2, Type.Float) ->
+      insert_let (g env e1) (fun x ->
+    insert_let (g env e2) (fun y ->
+        Prim (Ptest (Pfloat_test PTle), [x; y]), Type.Bool))
+  | Syntax.LE _ ->
+      failwith "KNormal: LE is only implemented for Int and Float arguments."
   | Syntax.If(e1, e2, e3) ->
       insert_let (g env e1) (fun x ->
         let e2', t2 = g env e2 in

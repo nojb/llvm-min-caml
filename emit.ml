@@ -389,7 +389,6 @@ let emit_fn_body fn =
               id the_builder) in
         loop (M.add id a env) (i+1) rest
   in let env = loop env 1 fn.formal_fv in
-  Printf.eprintf "done with first loop for %s\n" name;
   let rec loop env i = function
     | [] -> env
     | (Var id, _) :: rest ->
@@ -401,7 +400,6 @@ let emit_fn_body fn =
         set_value_name id a;
         loop (M.add id a env) (i+1) rest in
   let env = loop env 1 fn.args in
-  Printf.eprintf "done with second loop for %s\n" name;
   flush stderr;
   f_tail env fn.body;
   position_at_end (entry_block f) the_builder;
