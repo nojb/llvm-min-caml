@@ -121,9 +121,7 @@ exp: /* °ìÈÌ¤Î¼° (caml2html: parser_exp) */
     { LetRec($3, $5) }
 | exp actual_args
     %prec prec_app
-    { match $2 with
-      | [Unit] -> App ($1, [])
-      | _ -> App($1, $2) }
+    { App($1, $2) }
 | elems
     { Tuple($1) }
 | LET LPAREN pat RPAREN EQUAL exp IN exp
